@@ -1,0 +1,526 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  >
+
+  <meta name="theme-color" content="#166534">
+
+  <meta
+    name="description"
+    content="LokalBites farm-to-market shopping app"
+  >
+
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+
+  <link
+    rel="stylesheet"
+    href="/styles.css?v=lokalbites-final-3"
+  >
+
+  <title>LokalBites | Fresh from the Farm</title>
+
+  <style>
+    /* ======================================
+       PERMANENT PRODUCT IMAGE FIX
+       ====================================== */
+
+    
+
+    #app .products {
+      display: grid !important;
+      grid-template-columns: repeat(
+        2,
+        minmax(0, 1fr)
+      ) !important;
+      gap: 12px !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+    }
+
+    #app .products > .product {
+      display: flex !important;
+      flex-direction: column !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      overflow: hidden !important;
+      background: white !important;
+      border-radius: 16px !important;
+      box-sizing: border-box !important;
+    }
+
+    #app .products > .product > .produce-img {
+      position: relative !important;
+      display: block !important;
+      flex: none !important;
+      width: 100% !important;
+      height: 140px !important;
+      min-height: 140px !important;
+      max-height: 140px !important;
+      overflow: hidden !important;
+      border-radius: 12px !important;
+      margin-bottom: 12px !important;
+    }
+
+    #app .products > .product > .produce-img > img {
+      position: absolute !important;
+      inset: 0 !important;
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
+      object-fit: cover !important;
+      object-position: center !important;
+      margin: 0 !important;
+      transform: none !important;
+    }
+
+    #app .products > .product > h3,
+    #app .products > .product > p,
+    #app .products > .product > .bottom {
+      position: relative !important;
+      z-index: 1 !important;
+    }
+
+    @media (min-width: 700px) {
+      #app .products {
+        grid-template-columns: repeat(
+          4,
+          minmax(0, 1fr)
+        ) !important;
+      }
+    }
+
+    /* ======================================
+       LOKALBITES AI CHATBOT
+       ====================================== */
+
+    #ai-chat-btn {
+      display: none;
+      position: fixed;
+      right: 18px;
+      bottom: calc(
+        90px + env(safe-area-inset-bottom, 0px)
+      );
+      z-index: 9999;
+      padding: 14px 18px;
+      border: none;
+      border-radius: 50px;
+      background: #16803d;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 18px #0003;
+    }
+
+    #ai-chat-box {
+      display: none;
+      position: fixed;
+      right: 16px;
+      bottom: calc(
+        150px + env(safe-area-inset-bottom, 0px)
+      );
+      width: min(350px, calc(100vw - 32px));
+      height: min(420px, 60dvh);
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 5px 30px #0003;
+      z-index: 9999;
+      overflow: hidden;
+      flex-direction: column;
+    }
+
+    #ai-chat-header {
+      background: #16803d;
+      color: white;
+      padding: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #ai-chat-close {
+      background: transparent;
+      color: white;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    #ai-chat-messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 15px;
+      font-size: 14px;
+    }
+
+    .ai-msg {
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 12px;
+      background: #eef7ef;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .ai-user {
+      background: #dcfce7;
+      text-align: right;
+    }
+
+    #ai-chat-form {
+      display: flex;
+      gap: 6px;
+      padding: 10px;
+      border-top: 1px solid #ddd;
+    }
+
+    #ai-chat-input {
+      flex: 1;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+
+    #ai-chat-send {
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #16803d;
+      color: white;
+      cursor: pointer;
+    }
+
+    #ai-chat-send:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  </style>
+</head>
+
+<body>
+    <div id="lokalbites-image-fix-marker" hidden></div>
+
+  <!-- MAIN LOKALBITES APP -->
+  <div id="app"></div>
+
+  <!-- NOTIFICATIONS -->
+  <div
+    id="toast"
+    role="status"
+    aria-live="polite"
+  ></div>
+
+  <!-- IMAGE FIX MARKER -->
+  <span id="lokalbites-image-fix-marker"></span>
+
+  <!-- AI CHAT BUTTON -->
+  <button
+    id="ai-chat-btn"
+    type="button"
+    aria-controls="ai-chat-box"
+    aria-expanded="false"
+  >
+    🤖 Ask AI
+  </button>
+
+  <!-- AI CHAT PANEL -->
+  <section
+    id="ai-chat-box"
+    aria-label="LokalBites AI Assistant"
+  >
+    <div id="ai-chat-header">
+      <strong>🌱 LokalBites AI Assistant</strong>
+
+      <button
+        id="ai-chat-close"
+        type="button"
+        aria-label="Close chat"
+      >
+        ✕
+      </button>
+    </div>
+
+    <div
+      id="ai-chat-messages"
+      role="log"
+      aria-live="polite"
+    >
+      <div class="ai-msg">
+        Hello! I'm LokalBites AI.
+        How can I help you today?
+      </div>
+    </div>
+
+    <form id="ai-chat-form">
+      <input
+        id="ai-chat-input"
+        type="text"
+        placeholder="Ask me anything..."
+        aria-label="Chat message"
+        maxlength="1000"
+        required
+      >
+
+      <button
+        id="ai-chat-send"
+        type="submit"
+      >
+        Send
+      </button>
+    </form>
+  </section>
+
+  <!-- LOKALBITES APPLICATION -->
+  <script
+    defer
+    src="/app.js?v=lokalbites-final-3"
+  ></script>
+
+  <!-- AI CHAT AND PRODUCT IMAGE FIX -->
+  <script>
+    (() => {
+      'use strict';
+
+      const app = document.getElementById('app');
+
+      const chatBtn =
+        document.getElementById('ai-chat-btn');
+
+      const chatBox =
+        document.getElementById('ai-chat-box');
+
+      const closeBtn =
+        document.getElementById('ai-chat-close');
+
+      const form =
+        document.getElementById('ai-chat-form');
+
+      const input =
+        document.getElementById('ai-chat-input');
+
+      const messages =
+        document.getElementById('ai-chat-messages');
+
+      const sendBtn =
+        document.getElementById('ai-chat-send');
+
+      /* ====================================
+         AI CHAT
+         ==================================== */
+
+      function openChat(isOpen) {
+        chatBox.style.display =
+          isOpen ? 'flex' : 'none';
+
+        chatBtn.setAttribute(
+          'aria-expanded',
+          String(isOpen)
+        );
+
+        if (isOpen) {
+          input.focus();
+        }
+      }
+
+      function updateAIVisibility() {
+        const isHome = Boolean(
+          app.querySelector('.headline') &&
+          app.textContent.includes('Good food.') &&
+          app.textContent.includes('Great farmers.')
+        );
+
+        chatBtn.style.display =
+          isHome ? 'block' : 'none';
+
+        if (!isHome) {
+          openChat(false);
+        }
+      }
+
+      chatBtn.addEventListener('click', () => {
+        openChat(true);
+      });
+
+      closeBtn.addEventListener('click', () => {
+        openChat(false);
+      });
+
+      function addMessage(text, isUser = false) {
+        const element =
+          document.createElement('div');
+
+        element.className = isUser
+          ? 'ai-msg ai-user'
+          : 'ai-msg';
+
+        element.textContent = String(text);
+
+        messages.appendChild(element);
+
+        messages.scrollTop =
+          messages.scrollHeight;
+      }
+
+      form.addEventListener(
+        'submit',
+        async (event) => {
+          event.preventDefault();
+
+          const message = input.value.trim();
+
+          if (!message || sendBtn.disabled) {
+            return;
+          }
+
+          addMessage(message, true);
+
+          input.value = '';
+          sendBtn.disabled = true;
+          sendBtn.textContent = '...';
+
+          try {
+            const response = await fetch(
+              '/api/ai/chat',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message })
+              }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(
+                data.error || 'AI request failed'
+              );
+            }
+
+            addMessage(
+              data.reply || 'No response available.'
+            );
+          } catch (error) {
+            addMessage(
+              'Sorry, LokalBites AI is temporarily unavailable.'
+            );
+          } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+          }
+        }
+      );
+
+      /* ====================================
+         PERMANENT PRODUCT IMAGE FIX
+         ==================================== */
+
+      function fixProductImages() {
+        const cards = app.querySelectorAll(
+          '.products .product'
+        );
+
+        cards.forEach((card) => {
+          const box =
+            card.querySelector('.produce-img');
+
+          const img =
+            box?.querySelector('img');
+
+          if (!box || !img) {
+            return;
+          }
+
+          // Preserve emoji fallback on failed images.
+          if (img.style.display === 'none') {
+            return;
+          }
+
+          box.style.cssText = `
+            position: relative !important;
+            display: block !important;
+            width: 100% !important;
+            height: 140px !important;
+            min-height: 140px !important;
+            max-height: 140px !important;
+            overflow: hidden !important;
+            flex: none !important;
+            border-radius: 12px !important;
+            margin-bottom: 12px !important;
+          `;
+
+          img.style.cssText = `
+            position: absolute !important;
+            inset: 0 !important;
+            display: block !important;
+            width: 100% !important;
+            height: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: cover !important;
+            object-position: center !important;
+            margin: 0 !important;
+            transform: none !important;
+          `;
+        });
+      }
+
+      /* ====================================
+         RUN ON EVERY APP RENDER
+         ==================================== */
+
+      function updateLayout() {
+        updateAIVisibility();
+        fixProductImages();
+      }
+
+      const observer = new MutationObserver(
+        updateLayout
+      );
+
+      observer.observe(app, {
+        childList: true,
+        subtree: true
+      });
+
+      updateLayout();
+
+      window.addEventListener(
+        'pageshow',
+        updateLayout
+      );
+
+    })();
+  </script>
+
+</body>
+</html>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => {
+          console.log('LokalBites PWA ready');
+        })
+        .catch(error => {
+          console.error('PWA registration failed:', error);
+        });
+    });
+  }
+</script>

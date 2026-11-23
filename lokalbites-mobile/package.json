@@ -1,0 +1,1 @@
+{"name":"lokalbites-mobile","version":"1.0.0","private":true,"description":"LokalBites farm-to-market mobile-first full-stack web app","scripts":{"start":"node server.js","dev":"node --watch server.js","test":"node tests/smoke.js"},"engines":{"node":">=18"}}
