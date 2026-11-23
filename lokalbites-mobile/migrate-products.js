@@ -1,47 +1,49 @@
-
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const supabase = require('./supabase');
 
-
 async function migrateUsers() {
-  const filePath = path.join(__dirname, 'data.json');
+  const { users } = JSON.parse(fs.readFileSync(path.join(__dirname, 'data.json'), 'utf8'));
+  let matched = 0;
+  let skipped = 0;
 
-  const database = JSON.parse(
-    fs.readFileSync(filePath, 'utf8')
-  );
+  for (const user of users) {
+    const email = user.email.toLowerCase();
+    if (['customer@lokalbites.test', 'farmer@lokalbites.test'].includes(email)) {
+      skipped++;
+      continue;
+    }
 
-  const users = database.users.map((u) => ({
-    legacy_id: String(u.id),
-    name: u.name,
-    email: u.email.toLowerCase(),
-    role: u.role
-  }));
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('legacy_id')
+      .eq('email', email)
+      .maybeSingle();
 
-  if (!users.length) {
-    console.log('No users to migrate.');
-    return;
+    if (profileError) throw profileError;
+    if (!profile || String(profile.legacy_id) !== String(user.id)) {
+      skipped++;
+      continue;
+    }
+
+    const { error } = await supabase
+      .from('lokalbites_credentials')
+      .upsert({
+        email,
+        password_salt: user.salt,
+        password_hash: user.passwordHash
+      }, { onConflict: 'email', ignoreDuplicates: true });
+
+    if (error) throw error;
+    matched++;
   }
 
-  const { data, error } = await supabase
-    .from('users')
-    .upsert(users, {
-      onConflict: 'legacy_id'
-    })
-    .select('id, name, role');
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  console.log(
-    `Successfully migrated ${data.length} user profiles!`
-  );
+  console.log(`Matched ${matched} account(s). Skipped ${skipped} demo or unmatched account(s).`);
 }
 
-migrateUsers().catch((error) => {
-  console.error('Migration failed:', error.message);
+migrateUsers().catch(error => {
+  console.error('Migration failed:', error.code || error.message);
   process.exitCode = 1;
 });

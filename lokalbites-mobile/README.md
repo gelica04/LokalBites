@@ -1,87 +1,86 @@
-# LokalBites — Farm-to-Market Mobile App
+# LokalBites Mobile
 
-A working **mobile-first full-stack web app / installable PWA** developed from the supplied LokalBites 5-screen HTML prototype. Created for learning and demonstrations.
+LokalBites is an installable farm-to-market PWA with a plain HTML, CSS, and
+JavaScript frontend, a Node.js API, and Supabase for catalog, accounts, and orders.
+Checkout uses demo payments. The app does not charge money.
 
-## What works
+## Deploy to Vercel from GitHub
 
-- Mobile-responsive home, browsing, searching and category filtering.
-- Product catalog loaded from a real Node.js API, seeded with 10 sample produce items.
-- Cart with stock checks, quantity adjustment and persistent browser storage.
-- Customer registration and login; passwords hashed with scrypt, signed sessions.
-- Real order submission with server-side subtotal/delivery/community-fee calculation and inventory deduction.
-- Checkout validation, Cash on Delivery / Pay on Pickup, order confirmation and history.
-- Farmer login, inventory/price editing, product creation, hide/show, order review, order status transitions and restocking on cancellation.
-- Installable progressive web app shell with basic offline static asset cache (API data still requires connection).
+1. Apply the deployment changes to the `gelica04/LokalBites` repository. The
+   app lives in the inner `lokalbites-mobile` directory, alongside
+   `package.json`, `vercel.json`, `public/`, and `api/`. Push the changes
+   to the branch Vercel deploys. The repository's default branch is `main`.
+2. In the **existing LokalBites Supabase project**, open **SQL Editor** and run
+   the contents of `supabase-auth.sql` once. The migration adds private
+   credentials and an atomic registration function. It requires the existing
+   `public.users` table with unique `email` values. The rest of the app uses
+   the existing `products`, `orders`, and `order_items` tables, plus the
+   `place_lokalbites_order` and `update_lokalbites_order_status` database
+   functions. The original archive did not include SQL for those objects.
+3. In Vercel, choose **Add New → Project** and import `gelica04/LokalBites`,
+   or open the existing project for this repository. Use these settings.
 
-## Run in VS Code / Windows
+   | Setting | Value |
+   | --- | --- |
+   | Root Directory | `lokalbites-mobile` |
+   | Framework Preset | Other |
+   | Node.js Version | 24.x |
+   | Install Command | Default or `npm ci` |
+   | Build Command | Leave empty |
+   | Output Directory | `public`, set by `vercel.json` |
 
-1. Install Node.js 18+.
-2. Open the `lokalbites-mobile` folder in VS Code (File → Open Folder).
-3. Open Terminal → New Terminal.
-4. Run `node server.js` (or `npm start`; if PowerShell blocks npm, use `node server.js` directly).
-5. Visit **http://localhost:3000** in Chrome or Edge.
-6. To install on supported devices, serve over HTTPS, or use localhost on the same device. In Chrome/Edge use the browser's Install app command.
+4. Add the variables below to the project's **Environment Variables**.
+   Select **Production**. Select **Preview** too if you want preview URLs to
+   run against the database assigned to that environment.
 
-No `npm install` required: the server uses only built-in Node.js modules.
+   | Name | Value |
+   | --- | --- |
+   | `SUPABASE_URL` | Supabase project URL |
+   | `SUPABASE_SECRET_KEY` | Supabase server-side secret key from the same project |
+   | `APP_SECRET` | A new random signing secret of at least 32 characters |
+   | `GROQ_API_KEY` | Groq API key, optional for the AI chat |
 
-### Demo accounts
+   Generate `APP_SECRET` locally in PowerShell with Node.js.
 
-- Customer: **customer@lokalbites.test** / **Customer123!**
-- Farmer: **farmer@lokalbites.test** / **Farmer123!**
+   ```powershell
+   node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+   ```
 
-You can register new customer accounts inside the app. The farmer demo account is pre-seeded. Change demo passwords before deployment.
+   Enter the result directly in Vercel. Keep `.env` out of GitHub.
+5. Select **Deploy** or **Redeploy** after saving the variables. Open the URL
+   from Vercel and check `/api/health` for `{"ok":true}`. Then open
+   `/api/products` and confirm it lists your products. Register a demo customer,
+   sign out, sign back in, and place a demo order if you are using test data.
 
-### Example test run
+## Farmer and existing accounts
 
-Run `npm test` while the app is running, or `node tests/smoke.js`. The test uses a separate temporary server/data file and does not alter your main data.
+For a farmer account, register with a private password and promote that specific
+account in the Supabase SQL Editor. Replace the example address before running it.
 
-## Project structure
-
+```sql
+update public.users
+set role = 'farmer'
+where email = 'your-farmer@example.com';
 ```
-lokalbites-mobile/
-├── server.js                  Node.js API and static web server
-├── public/
-│   ├── index.html             App entrypoint
-│   ├── styles.css             Responsive mobile UI
-│   ├── app.js                 All app screens and interactions
-│   ├── manifest.webmanifest   PWA installation metadata
-│   ├── icon.svg               App icon
-│   └── sw.js                  Static asset offline cache
-├── tests/
-│   └── smoke.js              End-to-end API smoke test
-├── package.json
-└── README.md
+
+For earlier accounts whose password hashes still live in your original local
+`data.json`, save a backup of the file and run `npm.cmd run migrate:users`
+from the app folder after running the SQL migration. The command needs a local
+`.env` for the matching Supabase project. It imports credentials only when
+the email and legacy ID match, skips the old demo accounts, and preserves any
+credentials already stored in Supabase. Without the original password hashes,
+the profile still exists but cannot sign in with the old password.
+
+## Run locally on Windows
+
+Open the app folder that contains `package.json`. Install Node.js 24. Copy
+`.env.example` to `.env`, fill in the values above, and use a test database
+if you plan to place orders. Run these commands in PowerShell.
+
+```powershell
+npm.cmd ci
+npm.cmd start
 ```
 
-The database file `data.json` is created on first launch and ignored by Git. Delete it to reset demo products/accounts/orders.
-
-## API endpoints
-
-| Method | Path | Access |
-|---|---|---|
-| GET | `/api/health` | Public |
-| GET | `/api/products` | Public |
-| POST | `/api/auth/register` | Public |
-| POST | `/api/auth/login` | Public |
-| GET | `/api/auth/me` | Signed in |
-| POST | `/api/orders` | Customer |
-| GET | `/api/orders` | Customer |
-| GET | `/api/farmer/orders` | Farmer |
-| GET | `/api/farmer/products` | Farmer |
-| PATCH | `/api/farmer/orders/:id/status` | Farmer |
-| POST | `/api/farmer/products` | Farmer |
-| PATCH | `/api/farmer/products/:id` | Farmer |
-
-## Pricing
-
-- Delivery fee: ₱35, waived for pickup.
-- Community support fee: ₱10 per order.
-- Server computes all totals and checks stock (the client cannot set item prices).
-
-## What is NOT implemented
-
-This is a **working academic prototype**, not a production commerce platform. No real money is charged; checkout offers COD or pay on pickup only. It does not integrate live GPS, a courier system, SMS, real-time map tracking, verified farms, actual inventory sync, a payment gateway, or real farmer ownership controls. Sample farmer names, catalog items, prices and inventory are illustrative. It is a PWA, **not an Android APK or iOS IPA**. The local JSON file and single-process server are suitable for a demo only; a live launch needs a transactional database, stricter account permissions, HTTPS, secrets management, monitoring, and payment/delivery integrations. Do not expose this development server to the public internet as-is.
-
-## Deployment considerations
-
-Set `APP_SECRET` to a long random secret before any hosted testing, use HTTPS, and use a transactional database instead of the JSON file for concurrent purchases. Password reset and account verification are not present.
+Open `http://localhost:3000`. Run `npm.cmd test` to test the local API with a
+mock Supabase server. The test does not read or write the live database.

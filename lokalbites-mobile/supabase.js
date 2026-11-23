@@ -1,5 +1,4 @@
-
-require('dotenv').config();
+'use strict';
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -8,7 +7,7 @@ const supabaseKey = process.env.SUPABASE_SECRET_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   throw new Error(
-    'Missing Supabase credentials in .env file'
+    'Set SUPABASE_URL and SUPABASE_SECRET_KEY.'
   );
 }
 

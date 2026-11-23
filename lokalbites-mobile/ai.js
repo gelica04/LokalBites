@@ -1,17 +1,17 @@
-﻿require('dotenv').config();
+'use strict';
 
 const Groq = require('groq-sdk');
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-  timeout: 15000,
-  maxRetries: 0
-});
-
 async function askLokalBitesAI(message) {
   if (!process.env.GROQ_API_KEY) {
-    return 'Groq API key is missing.';
+    throw new Error('Groq API key is missing.');
   }
+
+  const groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY,
+    timeout: 15000,
+    maxRetries: 0
+  });
 
   try {
     const response = await groq.chat.completions.create({

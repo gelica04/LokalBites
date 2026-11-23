@@ -5,19 +5,19 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { promisify } = require('node:util');
 const supabase = require('./supabase');
 const { askLokalBitesAI } = require('./ai');
 
 const ROOT = __dirname;
 
-const DATA = process.env.VERCEL
-  ? '/tmp/lokalbites-data.json'
-  : path.join(ROOT, 'data.json');
-
 const PORT = Number(process.env.PORT || 3000);
-const SECRET =
-  process.env.APP_SECRET ||
-  'local-development-only-change-this-secret';
+const SECRET = process.env.APP_SECRET;
+const scrypt = promisify(crypto.scrypt);
+
+if (!SECRET || SECRET.length < 32) {
+  throw new Error('Set APP_SECRET to a random value with at least 32 characters.');
+}
 
 const mime = {
   '.html': 'text/html; charset=utf-8',
@@ -34,88 +34,6 @@ const mime = {
   '.webmanifest': 'application/manifest+json'
 };
 
-// Local seed data, only used if data.json does not exist.
-const seedProducts = [
-  ['Organic Broccoli','Vegetables',90,'kg','🥦','Pahiron Farm',24,'Bukidnon'],
-  ['Native Red Tomatoes','Vegetables',45,'kg','🍅','Claveria Farms',36,'Claveria'],
-  ['Sweet Highland Corn','Vegetables',50,'kg','🌽','Sumilao Cooperative',30,'Sumilao'],
-  ['Highland Potatoes','Root Crops',80,'kg','🥔','Lantapan Cooperative',22,'Lantapan'],
-  ['Fresh Carrots','Root Crops',65,'kg','🥕','Bukidnon Organic Farm',28,'Bukidnon'],
-  ['Ripe Bananas','Fruits',55,'bunch','🍌','Valley Growers',20,'Bukidnon'],
-  ['Fresh Mangoes','Fruits',120,'kg','🥭','Northern Mindanao Farms',18,'Misamis Oriental'],
-  ['Sweet Pineapple','Fruits',85,'piece','🍍','Sumilao Cooperative',12,'Sumilao'],
-  ['Green Cabbage','Vegetables',60,'kg','🥬','Pahiron Farm',26,'Bukidnon'],
-  ['Purple Eggplant','Vegetables',70,'kg','🍆','Claveria Farms',19,'Claveria']
-].map((a, i) => ({
-  id: 'p' + (i + 1),
-  name: a[0],
-  category: a[1],
-  price: a[2],
-  unit: a[3],
-  emoji: a[4],
-  farmer: a[5],
-  stock: a[6],
-  origin: a[7],
-  active: true
-}));
-
-function hash(password, salt) {
-  return crypto.scryptSync(password, salt, 64).toString('hex');
-}
-
-function createUser(name, email, password, role) {
-  const salt = crypto.randomBytes(16).toString('hex');
-
-  return {
-    id: crypto.randomUUID(),
-    name,
-    email: email.toLowerCase(),
-    salt,
-    passwordHash: hash(password, salt),
-    role,
-    createdAt: new Date().toISOString()
-  };
-}
-
-function initial() {
-  return {
-    users: [
-      createUser(
-        'Demo Customer',
-        'customer@lokalbites.test',
-        'Customer123!',
-        'customer'
-      ),
-      createUser(
-        'Demo Farmer',
-        'farmer@lokalbites.test',
-        'Farmer123!',
-        'farmer'
-      )
-    ],
-    products: seedProducts,
-    orders: []
-  };
-}
-
-let db;
-
-try {
-  db = JSON.parse(fs.readFileSync(DATA, 'utf8'));
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error;
-
-  db = initial();
-  fs.writeFileSync(DATA, JSON.stringify(db, null, 2));
-}
-
-function save() {
-  const temp = DATA + '.tmp';
-
-  fs.writeFileSync(temp, JSON.stringify(db, null, 2));
-  fs.renameSync(temp, DATA);
-}
-
 function json(res, status, obj) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -129,7 +47,7 @@ function json(res, status, obj) {
 function tokenFor(user) {
   const payload = Buffer.from(
     JSON.stringify({
-      id: user.id,
+      id: user.legacy_id,
       exp: Date.now() + 7 * 86400000
     })
   ).toString('base64url');
@@ -142,13 +60,13 @@ function tokenFor(user) {
   return payload + '.' + sig;
 }
 
-function getUser(req) {
+async function getUser(req) {
   const token = (req.headers.authorization || '')
     .replace(/^Bearer\s+/i, '');
 
   const [payload, signature] = token.split('.');
 
-  if (!payload || !signature) return null;
+  if (!payload || !signature || !/^[A-Za-z0-9_-]{43}$/.test(signature)) return null;
 
   const expected = crypto
     .createHmac('sha256', SECRET)
@@ -165,59 +83,57 @@ function getUser(req) {
     return null;
   }
 
+  let session;
   try {
-    const value = JSON.parse(
-      Buffer.from(payload, 'base64url').toString()
-    );
-
-    if (value.exp <= Date.now()) return null;
-
-    return db.users.find(u => u.id === value.id) || null;
+    session = JSON.parse(Buffer.from(payload, 'base64url').toString());
   } catch {
     return null;
   }
+
+  if (typeof session?.id !== 'string' || !(session.exp > Date.now())) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('users')
+    .select('legacy_id,name,email,role')
+    .eq('legacy_id', session.id)
+    .maybeSingle();
+
+  if (error) throw new Error('Unable to look up session', { cause: error });
+  return data;
 }
 
 function publicUser(u) {
   return {
-    id: u.id,
+    id: u.legacy_id,
     name: u.name,
     email: u.email,
     role: u.role
   };
 }
 
-function input(req) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    let raw = '';
+async function input(req) {
+  let size = 0;
+  const chunks = [];
 
-    req.on('data', chunk => {
-      size += chunk.length;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 100000) throw new Error('Request too large.');
+    chunks.push(chunk);
+  }
 
-      if (size > 100000) {
-        reject(new Error('Request too large'));
-        req.destroy();
-        return;
-      }
+  if (!size) return {};
 
-      raw += chunk;
-    });
-
-    req.on('end', () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-
-    req.on('error', reject);
-  });
+  const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('Expected a JSON object.');
+  }
+  return body;
 }
 
-function requireAuth(req, res, role) {
-  const user = getUser(req);
+async function requireAuth(req, res, role) {
+  const user = await getUser(req);
 
   if (!user) {
     json(res, 401, {
@@ -324,9 +240,16 @@ async function route(req, res, body, url) {
   const method = req.method;
   const p = url.pathname;
 
-  // HEALTH CHECK
-   
-    // LOKALBITES AI CHAT
+  if (method === 'GET' && p === '/api/health') {
+    const { error } = await supabase.from('products').select('id').limit(1);
+    if (error) {
+      console.error('Supabase health check:', error.code || error.message);
+      return json(res, 503, { ok: false, error: 'Unable to reach the product catalog.' });
+    }
+    return json(res, 200, { ok: true });
+  }
+
+  // LOKALBITES AI CHAT
   if (method === 'POST' && p === '/api/ai/chat') {
     const message = String(body?.message || '').trim();
 
@@ -357,76 +280,78 @@ async function route(req, res, body, url) {
       name.length < 2 ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
       typeof password !== 'string' ||
-      password.length < 8
+      password.length < 8 ||
+      password.length > 256
     ) {
       return json(res, 400, {
         error: 'Provide a valid name, email and password.'
       });
     }
 
-    if (db.users.some(u => u.email === email)) {
-      return json(res, 409, {
-        error: 'This email is already registered.'
-      });
+    const id = crypto.randomUUID();
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = (await scrypt(password, salt, 64)).toString('hex');
+    const { error } = await supabase.rpc('register_lokalbites_user', {
+      p_legacy_id: id,
+      p_name: name,
+      p_email: email,
+      p_password_salt: salt,
+      p_password_hash: passwordHash
+    });
+
+    if (error?.code === '23505') {
+      return json(res, 409, { error: 'This email is already registered.' });
     }
-
-    const user = createUser(
-      name, email, password, 'customer'
-    );
-
-    const { error } = await supabase
-      .from('users')
-      .upsert({
-        legacy_id: user.id,
-        name: user.name,
-        email: user.email,
-        role: 'customer'
-      }, {
-        onConflict: 'email'
-      });
 
     if (error) {
-      console.error('Register error:', error.message);
-
-      return json(res, 503, {
-        error: 'Unable to register. Please try again.'
-      });
+      console.error('Register:', error.code || error.message);
+      return json(res, 503, { error: 'Unable to register. Please try again.' });
     }
 
-    db.users.push(user);
-    save();
-
-    return json(res, 201, {
-      token: tokenFor(user),
-      user: publicUser(user)
-    });
+    const user = { legacy_id: id, name, email, role: 'customer' };
+    return json(res, 201, { token: tokenFor(user), user: publicUser(user) });
   }
 
   // LOGIN
   if (method === 'POST' && p === '/api/auth/login') {
     const email = safeText(body.email, 160).toLowerCase();
-
-    const user = db.users.find(u => u.email === email);
-
-    if (
-      !user ||
-      typeof body.password !== 'string' ||
-      hash(body.password, user.salt) !== user.passwordHash
-    ) {
-      return json(res, 401, {
-        error: 'Incorrect email or password.'
-      });
+    const password = body.password;
+    if (!email || typeof password !== 'string' || password.length > 256) {
+      return json(res, 401, { error: 'Incorrect email or password.' });
     }
 
-    return json(res, 200, {
-      token: tokenFor(user),
-      user: publicUser(user)
-    });
+    const { data: credentials, error: credentialsError } = await supabase
+      .from('lokalbites_credentials')
+      .select('password_salt,password_hash')
+      .eq('email', email)
+      .maybeSingle();
+    if (credentialsError) {
+      throw new Error('Unable to load credentials', { cause: credentialsError });
+    }
+
+    if (!credentials) {
+      return json(res, 401, { error: 'Incorrect email or password.' });
+    }
+
+    const hash = await scrypt(password, credentials.password_salt, 64);
+    if (!crypto.timingSafeEqual(hash, Buffer.from(credentials.password_hash, 'hex'))) {
+      return json(res, 401, { error: 'Incorrect email or password.' });
+    }
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('legacy_id,name,email,role')
+      .eq('email', email)
+      .maybeSingle();
+    if (userError) throw new Error('Unable to look up user', { cause: userError });
+    if (!user) return json(res, 401, { error: 'Incorrect email or password.' });
+
+    return json(res, 200, { token: tokenFor(user), user: publicUser(user) });
   }
 
   // CURRENT USER
   if (method === 'GET' && p === '/api/auth/me') {
-    const user = requireAuth(req, res);
+    const user = await requireAuth(req, res);
 
     if (!user) return;
 
@@ -456,12 +381,12 @@ async function route(req, res, body, url) {
 
   // CUSTOMER ORDER HISTORY
   if (method === 'GET' && p === '/api/orders') {
-    const user = requireAuth(req, res, 'customer');
+    const user = await requireAuth(req, res, 'customer');
 
     if (!user) return;
 
     try {
-      const orders = await getSupabaseOrders(user.id);
+      const orders = await getSupabaseOrders(user.legacy_id);
 
       return json(res, 200, { orders });
     } catch (error) {
@@ -475,7 +400,7 @@ async function route(req, res, body, url) {
 
   // CUSTOMER CHECKOUT
   if (method === 'POST' && p === '/api/orders') {
-    const user = requireAuth(req, res, 'customer');
+    const user = await requireAuth(req, res, 'customer');
 
     if (!user) return;
 
@@ -526,7 +451,7 @@ if (!allowedPayments.includes(payment)) {
     const { data, error } = await supabase.rpc(
       'place_lokalbites_order',
       {
-        p_user_legacy_id: user.id,
+        p_user_legacy_id: user.legacy_id,
         p_customer: customer,
         p_phone: phone,
         p_address: address,
@@ -551,7 +476,7 @@ if (!allowedPayments.includes(payment)) {
 
   // FARMER PRODUCTS
   if (method === 'GET' && p === '/api/farmer/products') {
-    const user = requireAuth(req, res, 'farmer');
+    const user = await requireAuth(req, res, 'farmer');
 
     if (!user) return;
 
@@ -573,7 +498,7 @@ if (!allowedPayments.includes(payment)) {
 
   // FARMER ORDERS
   if (method === 'GET' && p === '/api/farmer/orders') {
-    const user = requireAuth(req, res, 'farmer');
+    const user = await requireAuth(req, res, 'farmer');
 
     if (!user) return;
 
@@ -592,7 +517,7 @@ if (!allowedPayments.includes(payment)) {
 
   // FARMER ADD PRODUCT
   if (method === 'POST' && p === '/api/farmer/products') {
-    const user = requireAuth(req, res, 'farmer');
+    const user = await requireAuth(req, res, 'farmer');
 
     if (!user) return;
 
@@ -652,13 +577,8 @@ if (!allowedPayments.includes(payment)) {
       });
     }
 
-    const formatted = formatProduct(data);
-
-    db.products.push(formatted);
-    save();
-
     return json(res, 201, {
-      product: formatted
+      product: formatProduct(data)
     });
   }
 
@@ -668,7 +588,7 @@ if (!allowedPayments.includes(payment)) {
   );
 
   if (method === 'PATCH' && prod) {
-    const user = requireAuth(req, res, 'farmer');
+    const user = await requireAuth(req, res, 'farmer');
 
     if (!user) return;
 
@@ -734,17 +654,8 @@ if (!allowedPayments.includes(payment)) {
       });
     }
 
-    const formatted = formatProduct(data);
-
-    const local = db.products.find(p => p.id === id);
-
-    if (local) {
-      Object.assign(local, changes);
-      save();
-    }
-
     return json(res, 200, {
-      product: formatted
+      product: formatProduct(data)
     });
   }
 
@@ -754,7 +665,7 @@ if (!allowedPayments.includes(payment)) {
   );
 
   if (method === 'PATCH' && status) {
-    const user = requireAuth(req, res, 'farmer');
+    const user = await requireAuth(req, res, 'farmer');
 
     if (!user) return;
 
@@ -801,25 +712,37 @@ if (!allowedPayments.includes(payment)) {
   });
 }
 
-// FRONTEND FILES
+async function handleApi(req, res, url) {
+  if (!['GET', 'POST', 'PATCH'].includes(req.method)) {
+    return json(res, 405, { error: 'Method not allowed.' });
+  }
+
+  let body = {};
+  if (req.method !== 'GET') {
+    try {
+      body = await input(req);
+    } catch {
+      return json(res, 400, { error: 'Send a valid JSON object within 100 KB.' });
+    }
+  }
+
+  try {
+    return await route(req, res, body, url);
+  } catch (error) {
+    console.error('LokalBites API:', error.message, error.cause?.code || '');
+    return json(res, 503, { error: 'Request failed. Please try again.' });
+  }
+}
+
+// Local development server. Vercel serves these files directly from public/.
 const staticRoot = path.join(ROOT, 'public');
 
-const server = http.createServer(async (req, res) => {
-  try {
+function startServer() {
+  const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
 
     if (url.pathname.startsWith('/api/')) {
-      if (!['GET', 'POST', 'PATCH'].includes(req.method)) {
-        return json(res, 405, {
-          error: 'Method not allowed.'
-        });
-      }
-
-      const body = ['POST', 'PATCH'].includes(req.method)
-        ? await input(req)
-        : {};
-
-      return await route(req, res, body, url);
+      return handleApi(req, res, url);
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -827,9 +750,13 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    const requestedPath = decodeURIComponent(
-      url.pathname === '/' ? '/index.html' : url.pathname
-    );
+    let requestedPath;
+    try {
+      requestedPath = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+    } catch {
+      res.writeHead(400);
+      return res.end('Invalid path');
+    }
 
     const filepath = path.resolve(
       staticRoot,
@@ -861,22 +788,18 @@ const server = http.createServer(async (req, res) => {
 
       res.end(data);
     });
-  } catch (error) {
-    console.error('Server error:', error.message);
+  });
 
-    if (!res.headersSent) {
-      json(res, 400, {
-        error: error.message || 'Request failed.'
-      });
-    }
-  }
-});
+  server.on('error', error => {
+    console.error('Unable to start server:', error.message);
+    process.exitCode = 1;
+  });
 
-server.on('error', error => {
-  console.error('Unable to start server:', error.message);
-  process.exitCode = 1;
-});
+  return server.listen(PORT, () => {
+    console.log(`LokalBites running at http://localhost:${server.address().port}`);
+  });
+}
 
-server.listen(PORT, () => {
-  console.log(`LokalBites running at http://localhost:${PORT}`);
-});
+if (require.main === module) startServer();
+
+module.exports = { handleApi, startServer };

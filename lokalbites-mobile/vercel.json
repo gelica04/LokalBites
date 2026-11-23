@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "public",
+  "functions": {
+    "api/handler.js": { "maxDuration": 30, "excludeFiles": "{public/**,.env,.env.*}" }
+  },
+  "rewrites": [
+    { "source": "/api/:__lokalbites_path+", "destination": "/api/handler" }
+  ]
+}

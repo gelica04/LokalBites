@@ -956,13 +956,6 @@ function auth(mode = 'login', heading = 'Welcome Back') {
 
     </div>
 
-    <p
-      class="muted"
-      style="text-align:center"
-    >
-      Demo Customer: customer@lokalbites.test<br>
-      Password: Customer123!
-    </p>
   `;
 }
 

@@ -1,5 +1,5 @@
 
-const STATIC_CACHE = 'lokalbites-static-v3';
+const STATIC_CACHE = 'lokalbites-static-v4';
 const PRODUCT_CACHE = 'lokalbites-products-v3';
 
 const APP_FILES = [
